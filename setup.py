@@ -3,7 +3,9 @@ from setuptools import setup, find_packages
 # 从requirements.txt文件读取依赖
 def parse_requirements(filename):
     with open(filename, 'r', encoding='utf-8') as f:
-        return f.read().splitlines()
+        lines = f.read().splitlines()
+    # Filter out comments and blank lines
+    return [line.strip() for line in lines if line.strip() and not line.strip().startswith('#')]
         
 setup(
     name='dots_ocr',  
