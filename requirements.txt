@@ -7,5 +7,17 @@ qwen_vl_utils
 transformers==4.51.3
 huggingface_hub
 modelscope
-flash-attn==2.8.0.post2
+# flash-attn==2.8.0.post2  # Disabled on Windows (difficult to build). Enable on Linux/GPU.
 accelerate
+
+# --- Phase 1 additions ---
+# torch CPU build: install separately via --index-url https://download.pytorch.org/whl/cpu
+fastapi
+uvicorn[standard]
+python-multipart
+openpyxl
+beautifulsoup4
+pandas
+pydantic>=2.0
+python-dotenv
+pyyaml

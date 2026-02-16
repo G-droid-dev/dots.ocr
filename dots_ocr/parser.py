@@ -6,7 +6,10 @@ import argparse
 
 
 from dots_ocr.model.inference import inference_with_vllm
-from dots_ocr.utils.consts import image_extensions, MIN_PIXELS, MAX_PIXELS
+from dots_ocr.utils.consts import (
+    image_extensions, excel_extensions, MIN_PIXELS, MAX_PIXELS,
+    MAX_PIXELS_FULL, DEFAULT_DPI, DEFAULT_MAX_TOKENS,
+)
 from dots_ocr.utils.image_utils import get_image_by_fitz_doc, fetch_image, smart_resize
 from dots_ocr.utils.doc_utils import fitz_doc_to_image, load_images_from_pdf
 from dots_ocr.utils.prompts import dict_promptmode_to_prompt
@@ -26,13 +29,17 @@ class DotsOCRParser:
             model_name='model',
             temperature=0.1,
             top_p=1.0,
-            max_completion_tokens=16384,
+            max_completion_tokens=DEFAULT_MAX_TOKENS,
             num_thread=64,
-            dpi = 200, 
+            dpi=DEFAULT_DPI, 
             output_dir="./output", 
             min_pixels=None,
             max_pixels=None,
             use_hf=False,
+            backend='vllm',
+            device='cpu',
+            model_path='./weights/DotsOCR',
+            tables_only=False,
         ):
         self.dpi = dpi
 
@@ -49,31 +56,65 @@ class DotsOCRParser:
         self.output_dir = output_dir
         self.min_pixels = min_pixels
         self.max_pixels = max_pixels
+        self.tables_only = tables_only
 
-        self.use_hf = use_hf
+        # Backend selection: 'vllm', 'hf', or 'gguf'
+        self.backend = backend
+        self.device = device
+        self.model_path = model_path
+
+        # Legacy compatibility
+        self.use_hf = use_hf or (backend == 'hf')
         if self.use_hf:
+            self.backend = 'hf'
+
+        if self.backend == 'hf':
             self._load_hf_model()
-            print(f"use hf model, num_thread will be set to 1")
+            print(f"use hf model on {self.device}, num_thread will be set to 1")
+        elif self.backend == 'gguf':
+            self._load_gguf_model()
+            print(f"use gguf model, num_thread will be set to 1")
         else:
             print(f"use vllm model, num_thread will be set to {self.num_thread}")
         assert self.min_pixels is None or self.min_pixels >= MIN_PIXELS
-        assert self.max_pixels is None or self.max_pixels <= MAX_PIXELS
+        assert self.max_pixels is None or self.max_pixels <= MAX_PIXELS_FULL
 
     def _load_hf_model(self):
         import torch
-        from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoProcessor
         from qwen_vl_utils import process_vision_info
 
-        model_path = "./weights/DotsOCR"
+        # Select dtype and attention implementation based on device
+        if self.device == 'cpu':
+            # Use bfloat16 even on CPU — the model's vision encoder (DotsVision)
+            # hardcodes hidden_states.bfloat16() in its forward(), so we must
+            # keep all weights in bfloat16 to avoid dtype mismatches.
+            # PyTorch supports bfloat16 on CPU since v1.10.
+            torch_dtype = torch.bfloat16
+            attn_impl = 'sdpa'
+            device_map = 'cpu'
+        else:
+            torch_dtype = torch.bfloat16
+            attn_impl = 'flash_attention_2'
+            device_map = 'auto'
+
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            attn_implementation="flash_attention_2",
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
+            self.model_path,
+            attn_implementation=attn_impl,
+            torch_dtype=torch_dtype,
+            device_map=device_map,
             trust_remote_code=True
         )
-        self.processor = AutoProcessor.from_pretrained(model_path,  trust_remote_code=True,use_fast=True)
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_path, trust_remote_code=True, use_fast=True
+        )
         self.process_vision_info = process_vision_info
+
+    def _load_gguf_model(self):
+        """Placeholder for GGUF backend loading (Phase 1, step 1.1)."""
+        raise NotImplementedError(
+            "GGUF backend not yet implemented. Use backend='hf' or backend='vllm'."
+        )
 
     def _inference_with_hf(self, image, prompt):
         messages = [
@@ -104,10 +145,10 @@ class DotsOCRParser:
             return_tensors="pt",
         )
 
-        inputs = inputs.to("cuda")
+        inputs = inputs.to(self.device)
 
         # Inference: Generation of the output
-        generated_ids = self.model.generate(**inputs, max_new_tokens=24000)
+        generated_ids = self.model.generate(**inputs, max_new_tokens=self.max_completion_tokens)
         generated_ids_trimmed = [
             out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
@@ -165,8 +206,10 @@ class DotsOCRParser:
             image = fetch_image(origin_image, min_pixels=min_pixels, max_pixels=max_pixels)
         input_height, input_width = smart_resize(image.height, image.width)
         prompt = self.get_prompt(prompt_mode, bbox, origin_image, image, min_pixels=min_pixels, max_pixels=max_pixels)
-        if self.use_hf:
+        if self.backend == 'hf':
             response = self._inference_with_hf(image, prompt)
+        elif self.backend == 'gguf':
+            response = self._inference_with_gguf(image, prompt)
         else:
             response = self._inference_with_vllm(image, prompt)
         result = {'page_no': page_idx,
@@ -222,6 +265,10 @@ class DotsOCRParser:
                     'layout_info_path': json_file_path,
                     'layout_image_path': image_layout_path,
                 })
+                # Filter to tables only if requested
+                if self.tables_only:
+                    cells = [c for c in cells if c.get('category') == 'Table']
+
                 if prompt_mode != "prompt_layout_only_en":  # no text md when detection only
                     md_content = layoutjson2md(origin_image, cells, text_key='text')
                     md_content_no_hf = layoutjson2md(origin_image, cells, text_key='text', no_page_hf=True) # used for clean output or metric of omnidocbench、olmbench 
@@ -276,8 +323,8 @@ class DotsOCRParser:
         def _execute_task(task_args):
             return self._parse_single_image(**task_args)
 
-        if self.use_hf:
-            num_thread =  1
+        if self.backend in ('hf', 'gguf'):
+            num_thread = 1
         else:
             num_thread = min(total_pages, self.num_thread)
         print(f"Parsing PDF with {total_pages} pages using {num_thread} threads...")
@@ -292,6 +339,30 @@ class DotsOCRParser:
         results.sort(key=lambda x: x["page_no"])
         for i in range(len(results)):
             results[i]['file_path'] = input_path
+        return results
+
+    def parse_excel(self, input_path, filename, save_dir):
+        """Parse Excel file directly into structured table data (no OCR needed)."""
+        from dots_ocr.utils.excel_utils import excel_to_html_tables
+        html_tables = excel_to_html_tables(input_path)
+        results = []
+        for i, (sheet_name, html) in enumerate(html_tables):
+            json_file_path = os.path.join(save_dir, f"{filename}_sheet_{i}.json")
+            cell_data = [{'bbox': [0, 0, 0, 0], 'category': 'Table', 'text': html}]
+            with open(json_file_path, 'w', encoding='utf-8') as w:
+                json.dump(cell_data, w, ensure_ascii=False)
+            md_file_path = os.path.join(save_dir, f"{filename}_sheet_{i}.md")
+            with open(md_file_path, 'w', encoding='utf-8') as md_file:
+                md_file.write(f"## {sheet_name}\n\n{html}\n")
+            results.append({
+                'page_no': i,
+                'sheet_name': sheet_name,
+                'layout_info_path': json_file_path,
+                'md_content_path': md_file_path,
+                'file_path': input_path,
+                'input_height': 0,
+                'input_width': 0,
+            })
         return results
 
     def parse_file(self, 
@@ -311,8 +382,13 @@ class DotsOCRParser:
             results = self.parse_pdf(input_path, filename, prompt_mode, save_dir)
         elif file_ext in image_extensions:
             results = self.parse_image(input_path, filename, prompt_mode, save_dir, bbox=bbox, fitz_preprocess=fitz_preprocess)
+        elif file_ext in excel_extensions:
+            results = self.parse_excel(input_path, filename, save_dir)
         else:
-            raise ValueError(f"file extension {file_ext} not supported, supported extensions are {image_extensions} and pdf")
+            raise ValueError(
+                f"file extension {file_ext} not supported, supported extensions are "
+                f"{image_extensions | excel_extensions} and pdf"
+            )
         
         print(f"Parsing finished, results saving to {save_dir}")
         with open(os.path.join(output_dir, os.path.basename(filename)+'.jsonl'), 'w', encoding="utf-8") as w:

@@ -1,0 +1,173 @@
+# Column header patterns → schema field
+# Patterns are case-insensitive regex
+# Add per-OEM or per-country overrides by creating additional YAML files.
+
+mappings:
+  model:
+    patterns:
+      - "model"
+      - "modell"
+      - "modèle"
+      - "modelo"
+      - "車型"
+      - "モデル"
+    schema_field: "model"
+
+  variant:
+    patterns:
+      - "variant"
+      - "variante"
+      - "version"
+      - "ausstattung"
+      - "trim"
+      - "grade"
+      - "niveau"
+    schema_field: "variant"
+
+  trim:
+    patterns:
+      - "trim"
+      - "finition"
+      - "allestimento"
+    schema_field: "trim"
+
+  body_type:
+    patterns:
+      - "body"
+      - "karosserie"
+      - "carrosserie"
+      - "carrozzeria"
+      - "carrocería"
+    schema_field: "body_type"
+
+  engine_description:
+    patterns:
+      - "engine"
+      - "motor"
+      - "moteur"
+      - "エンジン"
+      - "displacement"
+      - "hubraum"
+      - "cilindrata"
+    schema_field: "engine.description"
+
+  fuel_type:
+    patterns:
+      - "fuel"
+      - "kraftstoff"
+      - "carburant"
+      - "combustible"
+      - "燃料"
+    schema_field: "engine.fuel_type"
+
+  power_hp:
+    patterns:
+      - "power.*hp"
+      - "ps$"
+      - "hp$"
+      - "cv$"
+      - "ch$"
+      - "bhp"
+      - "puissance"
+    schema_field: "engine.power_hp"
+
+  power_kw:
+    patterns:
+      - "power.*kw"
+      - "kw$"
+      - "leistung.*kw"
+    schema_field: "engine.power_kw"
+
+  transmission:
+    patterns:
+      - "transmission"
+      - "getriebe"
+      - "boîte"
+      - "cambio"
+      - "gearbox"
+      - "トランスミッション"
+    schema_field: "transmission"
+
+  drivetrain:
+    patterns:
+      - "drivetrain"
+      - "drive"
+      - "antrieb"
+      - "traction"
+      - "tracción"
+      - "4wd"
+      - "awd"
+      - "fwd"
+      - "rwd"
+    schema_field: "drivetrain"
+
+  doors:
+    patterns:
+      - "doors"
+      - "türen"
+      - "portes"
+      - "porte"
+      - "puertas"
+    schema_field: "doors"
+
+  seats:
+    patterns:
+      - "seats"
+      - "sitze"
+      - "sièges"
+      - "plazas"
+      - "posti"
+    schema_field: "seats"
+
+  price:
+    patterns:
+      - "price"
+      - "preis"
+      - "prix"
+      - "precio"
+      - "prezzo"
+      - "価格"
+      - "msrp"
+      - "rrp"
+      - "pvp"
+      - "listino"
+    schema_field: "price.value"
+
+  currency:
+    patterns:
+      - "currency"
+      - "währung"
+      - "devise"
+      - "divisa"
+      - "moneda"
+    schema_field: "price.currency"
+
+  effective_date:
+    patterns:
+      - "date"
+      - "datum"
+      - "fecha"
+      - "gültig"
+      - "valid"
+      - "effective"
+    schema_field: "effective_date"
+
+  country:
+    patterns:
+      - "country"
+      - "land"
+      - "pays"
+      - "país"
+      - "paese"
+    schema_field: "country"
+
+  make:
+    patterns:
+      - "make"
+      - "marke"
+      - "marque"
+      - "marca"
+      - "メーカー"
+      - "manufacturer"
+      - "brand"
+    schema_field: "make"
